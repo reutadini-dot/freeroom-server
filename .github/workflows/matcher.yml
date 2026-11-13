@@ -1,15 +1,17 @@
 name: FreeRoom matcher
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch: {}
+# One run at a time. A run stays alive ~50 minutes and reacts to changes within seconds; the next run
+# waits in the queue and starts the moment this one ends, so there is practically no gap.
 concurrency:
   group: freeroom-matcher
   cancel-in-progress: false
 jobs:
-  tick:
+  watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 58
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -17,6 +19,7 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: node matcher.js
         env:
+          WATCH_MINUTES: '50'
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FIREBASE_PROJECT_ID: freeroom-ced60
           SMTP_USER: ${{ secrets.SMTP_USER }}
