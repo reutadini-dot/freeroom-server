@@ -269,7 +269,7 @@ async function watch(db, clinics, minutes){
 
 async function main(){
   const db = initAdmin();
-  const clinics = process.env.CLINIC_IDS ? process.env.CLINIC_IDS.split(',') : (await db.collection('clinics').get()).docs.map(d=>d.id);
+  const clinics = process.env.CLINIC_IDS ? process.env.CLINIC_IDS.split(',') : process.env.WATCH_MINUTES ? ['cOk15OV10cZCCK4ubelo'] : (await db.collection('clinics').get()).docs.map(d=>d.id);
   if(process.env.WATCH_MINUTES){ await watch(db, clinics, Number(process.env.WATCH_MINUTES)); console.log('done'); return; }
   for(let i=0;i<TICKS;i++){
     for(const c of clinics){ try{ await tickClinic(db, c); }catch(e){ console.error('['+c+'] tick failed:', e); } }
