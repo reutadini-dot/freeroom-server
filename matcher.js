@@ -209,9 +209,68 @@ async function tickClinic(db, clinicId){
   }
 }
 
+/* ---------- watch mode: stay alive and react within seconds ----------
+   Listens (Firestore realtime) to the few small sets that matter: available releases, waiting requests,
+   open offers, and notifications still to be emailed. A listener costs reads only when something
+   changes, so this is far cheaper than polling. A tick runs ~2s after any change, and at the next
+   deadline (offer expiry / reminder / end of a released slot), with a 20-minute safety net. */
+async function watch(db, clinics, minutes){
+  const endAt = Date.now() + minutes*60000;
+  const state = {}; // clinicId -> { deadlines:{offers:[],releases:[]}, running:false, dirty:false, timer:null, deadlineTimer:null }
+  const MAX_WAIT = 20*60000;
+  const scheduleDeadline = (c)=>{
+    const st = state[c]; if(st.deadlineTimer){ clearTimeout(st.deadlineTimer); st.deadlineTimer=null; }
+    const now = Date.now();
+    const all = [...st.deadlines.offers, ...st.deadlines.releases].filter(t=>t>now);
+    const next = Math.min(MAX_WAIT, all.length? Math.min(...all)-now+1500 : MAX_WAIT);
+    st.deadlineTimer = setTimeout(()=>request(c, 0), Math.max(next, 1000));
+  };
+  const runTick = async (c)=>{
+    const st = state[c];
+    if(st.running){ st.dirty = true; return; }
+    st.running = true; st.dirty = false;
+    try{ await tickClinic(db, c); }catch(e){ console.error('['+c+'] tick failed:', e); }
+    st.running = false;
+    scheduleDeadline(c);
+    if(st.dirty) request(c, 2000);
+  };
+  const request = (c, delay)=>{
+    const st = state[c]; if(st.timer) return;
+    st.timer = setTimeout(()=>{ st.timer = null; runTick(c); }, delay);
+  };
+  const unsubs = [];
+  for(const c of clinics){
+    state[c] = { deadlines:{offers:[],releases:[]}, running:false, dirty:false, timer:null, deadlineTimer:null };
+    const base = db.collection('clinics').doc(c);
+    const listen = (q, onDocs)=>{
+      let first = true;
+      unsubs.push(q.onSnapshot(snap=>{
+        if(onDocs) onDocs(snap.docs.map(d=>d.data()));
+        if(first){ first = false; return; }          // the initial load is covered by the start-up tick
+        if(snap.docChanges().length) request(c, 2000);
+      }, err=>console.error('['+c+'] listener error:', err.message)));
+    };
+    listen(base.collection('releases').where('status','==','AVAILABLE'), docs=>{ state[c].deadlines.releases = docs.map(r=>slotEndMs(r.date,r.end)); scheduleDeadline(c); });
+    listen(base.collection('requests').where('status','==','WAITING'));
+    listen(base.collection('offers').where('status','==','OFFERED'), docs=>{
+      state[c].deadlines.offers = docs.flatMap(o=>{ const e = new Date(o.expiresAt).getTime(); return o.reminderSent? [e] : [e, e-3*3600000]; });
+      scheduleDeadline(c);
+    });
+    listen(base.collection('notifications').where('emailed','==',false));
+    request(c, 500);
+  }
+  console.log('watching', clinics.join(','), 'for', minutes, 'minutes');
+  await new Promise(r=>setTimeout(r, endAt-Date.now()));
+  unsubs.forEach(u=>{ try{ u(); }catch(e){} });
+  for(const c of clinics){ clearTimeout(state[c].timer); clearTimeout(state[c].deadlineTimer); }
+  // let a tick that is in progress finish
+  for(let i=0;i<60 && Object.values(state).some(s=>s.running);i++) await new Promise(r=>setTimeout(r,500));
+}
+
 async function main(){
   const db = initAdmin();
   const clinics = process.env.CLINIC_IDS ? process.env.CLINIC_IDS.split(',') : (await db.collection('clinics').get()).docs.map(d=>d.id);
+  if(process.env.WATCH_MINUTES){ await watch(db, clinics, Number(process.env.WATCH_MINUTES)); console.log('done'); return; }
   for(let i=0;i<TICKS;i++){
     for(const c of clinics){ try{ await tickClinic(db, c); }catch(e){ console.error('['+c+'] tick failed:', e); } }
     if(i<TICKS-1) await new Promise(r=>setTimeout(r, TICK_GAP_MS));
