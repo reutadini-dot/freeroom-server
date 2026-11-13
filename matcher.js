@@ -248,7 +248,7 @@ async function watch(db, clinics, minutes){
         if(onDocs) onDocs(snap.docs.map(d=>d.data()));
         if(first){ first = false; return; }          // the initial load is covered by the start-up tick
         if(snap.docChanges().length) request(c, 2000);
-      }, err=>console.error('['+c+'] listener error:', err.message)));
+      }, err=>{ console.error('['+c+'] listener error, retrying in 60s:', err.message); setTimeout(()=>listen(q, onDocs), 60000); }));
     };
     listen(base.collection('releases').where('status','==','AVAILABLE'), docs=>{ state[c].deadlines.releases = docs.map(r=>slotEndMs(r.date,r.end)); scheduleDeadline(c); });
     listen(base.collection('requests').where('status','==','WAITING'));
