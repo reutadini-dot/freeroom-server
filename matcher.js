@@ -94,7 +94,7 @@ async function sendMail(to, subject, text){
     return true;
   }catch(e){ console.warn('  email failed', to, e.message); return false; }
 }
-const EMAIL_TYPES = { 'offer':'נמצא עבורך חדר — נדרש אישור', 'offer-reminder':'תזכורת: ההצעה לחדר עומדת לפוג', 'co-release':'שאלה לגבי פינוי חדר משותף', 'manager-approval-needed':'בקשה הממתינה לאישור מנהל/ת' };
+const EMAIL_TYPES = { 'offer':'נמצא עבורך חדר — נדרש אישור', 'offer-reminder':'תזכורת: ההצעה לחדר עומדת לפוג', 'co-release':'שאלה לגבי פינוי חדר משותף', 'manager-approval-needed':'בקשה הממתינה לאישור מנהל/ת', 'request-received':'בקשתך לחדר התקבלה', 'confirmed':'החדר שובץ עבורך', 'approved':'בקשתך אושרה', 'rejected':'בקשתך נדחתה', 'manager-change':'עדכון בשיבוץ שלך', 'expired':'עדכון לגבי הבקשה או ההצעה שלך' };
 
 /* ---------- one clinic, one tick ---------- */
 async function tickClinic(db, clinicId){
