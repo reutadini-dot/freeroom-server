@@ -209,7 +209,7 @@ async function tickClinic(db, clinicId){
   }
 }
 
-/* ---------- watch mode: stay alive and react within seconds ----------
+async function dedupeReleases(db, clinicId){ const apply = process.env.DEDUPE_MODE === 'apply'; const col = n => db.collection('clinics').doc(clinicId).collection(n); const today = ilDate(Date.now()); const rels = (await col('releases').where('date','>=',today).get()).docs.map(d=>({id:d.id, ref:d.ref, ...d.data()})); const live = rels.filter(r=>['AVAILABLE','PENDING_CO_USER_APPROVAL','OFFERED','ALLOCATED'].includes(r.status)); const groups = {}; for(const r of live){ const k = [r.roomId, r.date, r.start, r.end, r.releasedBy].join('|'); (groups[k] = groups[k] || []).push(r); } for(const g of Object.values(groups)){ if(g.length < 2) continue; const rank = r => r.status==='ALLOCATED'? 0 : r.status==='OFFERED'? 1 : 2; g.sort((a,b)=> rank(a)-rank(b) || String(a.createdAt).localeCompare(String(b.createdAt))); const keep = g[0], dups = g.slice(1); if(dups.some(r=>r.status==='ALLOCATED' || r.status==='OFFERED')){ console.log('['+clinicId+'] duplicate with active offer/allocation, not touching:', g.map(r=>r.id+':'+r.status).join(', ')); continue; } console.log('['+clinicId+'] '+(apply?'merging':'WOULD MERGE')+' duplicate release', keep.roomName, keep.date, keep.start+'-'+keep.end, 'keep', keep.id, 'drop', dups.map(r=>r.id).join(',')); if(!apply) continue; const byId = new Map(); for(const r of g) for(const c of (r.coUsers||[])){ const p = byId.get(c.staffId); if(!p || c.status==='declined' || (c.status==='confirmed' && p.status==='pending')) byId.set(c.staffId, c); } const co = [...byId.values()]; const status = co.some(c=>c.status==='declined')? 'CANCELLED_PARTIAL' : (co.every(c=>c.status==='confirmed')? 'AVAILABLE' : 'PENDING_CO_USER_APPROVAL'); if(keep.status==='AVAILABLE' || keep.status==='PENDING_CO_USER_APPROVAL') await keep.ref.update({coUsers:co, status}); for(const r of dups) await r.ref.update({status:'CANCELLED', mergedInto:keep.id}); await col('auditLog').add({ ts:new Date().toISOString(), actorId:null, actorName:'שרת (אוטומטי)', action:'releases_merged', details:{keep:keep.id, dropped:dups.map(r=>r.id)} }); } } /* ---------- watch mode: stay alive and react within seconds ----------
    Listens (Firestore realtime) to the few small sets that matter: available releases, waiting requests,
    open offers, and notifications still to be emailed. A listener costs reads only when something
    changes, so this is far cheaper than polling. A tick runs ~2s after any change, and at the next
@@ -259,9 +259,9 @@ async function watch(db, clinics, minutes){
     listen(base.collection('notifications').where('emailed','==',false));
     request(c, 500);
   }
-  console.log('watching', clinics.join(','), 'for', minutes, 'minutes');
+  console.log('watching', clinics.join(','), 'for', minutes, 'minutes'); const runDedupe = ()=>{ clinics.forEach(c=>dedupeReleases(db, c).catch(e=>console.error('['+c+'] dedupe failed:', e.message))); }; setTimeout(runDedupe, 20000); const dedupeTimer = setInterval(runDedupe, 60*60000);
   await new Promise(r=>setTimeout(r, endAt-Date.now()));
-  unsubs.forEach(u=>{ try{ u(); }catch(e){} });
+  clearInterval(dedupeTimer); unsubs.forEach(u=>{ try{ u(); }catch(e){} });
   for(const c of clinics){ clearTimeout(state[c].timer); clearTimeout(state[c].deadlineTimer); }
   // let a tick that is in progress finish
   for(let i=0;i<60 && Object.values(state).some(s=>s.running);i++) await new Promise(r=>setTimeout(r,500));
