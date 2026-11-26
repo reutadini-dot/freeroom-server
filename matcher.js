@@ -181,7 +181,7 @@ async function tickClinic(db, clinicId){
     const active = await col('offers').where('releaseId','==',rel.id).where('status','==','OFFERED').get();
     if(!active.empty) continue;
     if(candidates.length>1) candidates.sort(await getFairness());
-    const fullFit = candidates.filter(r=>timeToMin(r.start)>=timeToMin(rel.start)&&timeToMin(r.end)<=timeToMin(rel.end)); const top = fullFit.length? fullFit[0] : candidates[0]; const oStart = minToTime(Math.max(timeToMin(top.start),timeToMin(rel.start))), oEnd = minToTime(Math.min(timeToMin(top.end),timeToMin(rel.end))); const partial = oStart!==top.start || oEnd!==top.end;
+    const fullFit = candidates.filter(r=>timeToMin(r.start)>=timeToMin(rel.start)&&timeToMin(r.end)<=timeToMin(rel.end)); const top = candidates[0]; const oStart = minToTime(Math.max(timeToMin(top.start),timeToMin(rel.start))), oEnd = minToTime(Math.min(timeToMin(top.end),timeToMin(rel.end))); const partial = oStart!==top.start || oEnd!==top.end;
     const expMs = Math.min(addActiveHours(Date.now(), 8), slotEndMs(rel.date, oEnd));
     const expDay = ilDate(expMs)===ilDate(Date.now())? 'היום' : 'ב-'+fmtDateShort(ilDate(expMs));
     console.log('['+clinicId+'] offer:', rel.roomName, rel.date, oStart+'-'+oEnd+(partial?' (partial of '+top.start+'-'+top.end+')':''), '->', top.staffName);
