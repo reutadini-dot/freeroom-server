@@ -37,7 +37,7 @@ function ilDate(ms){ const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA
 function ilTime(ms){ const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hourCycle:'h23',hour:'2-digit',minute:'2-digit'}).formatToParts(new Date(ms)).map(x=>[x.type,x.value])); return p.hour+':'+p.minute; }
 function addDaysStr(dateStr, n){ const d = new Date(dateStr+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
 function fmtDateShort(dateStr){ if(!dateStr) return ''; const [y,m,d] = dateStr.split('-').map(Number); return d+'.'+m; }
-function timeToMin(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
+function minToTime(m){ return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); } function timeToMin(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
 function hoursBetween(a,b){ return (timeToMin(b)-timeToMin(a))/60; }
 function slotEndMs(date, end){ return ilToMs(date, end); }
 function addActiveHours(fromMs, hours, startH=7, endH=21){
@@ -176,23 +176,23 @@ async function tickClinic(db, clinicId){
   for(const rel of releases){
     const excluded = rel.excludedStaffIds||[];
     const candidates = requests.filter(r=> r.status==='WAITING' && r.staffId!==rel.releasedBy && !excluded.includes(r.staffId) &&
-      r.dateFrom===rel.date && r.dateTo===rel.date && timeToMin(r.start)>=timeToMin(rel.start) && timeToMin(r.end)<=timeToMin(rel.end));
+      r.dateFrom===rel.date && r.dateTo===rel.date && Math.min(timeToMin(r.end),timeToMin(rel.end))-Math.max(timeToMin(r.start),timeToMin(rel.start))>=30);
     if(!candidates.length) continue;
     const active = await col('offers').where('releaseId','==',rel.id).where('status','==','OFFERED').get();
     if(!active.empty) continue;
     if(candidates.length>1) candidates.sort(await getFairness());
-    const top = candidates[0];
-    const expMs = Math.min(addActiveHours(Date.now(), 8), slotEndMs(rel.date, top.end));
+    const fullFit = candidates.filter(r=>timeToMin(r.start)>=timeToMin(rel.start)&&timeToMin(r.end)<=timeToMin(rel.end)); const top = fullFit.length? fullFit[0] : candidates[0]; const oStart = minToTime(Math.max(timeToMin(top.start),timeToMin(rel.start))), oEnd = minToTime(Math.min(timeToMin(top.end),timeToMin(rel.end))); const partial = oStart!==top.start || oEnd!==top.end;
+    const expMs = Math.min(addActiveHours(Date.now(), 8), slotEndMs(rel.date, oEnd));
     const expDay = ilDate(expMs)===ilDate(Date.now())? 'היום' : 'ב-'+fmtDateShort(ilDate(expMs));
-    console.log('['+clinicId+'] offer:', rel.roomName, rel.date, top.start+'-'+top.end, '->', top.staffName);
+    console.log('['+clinicId+'] offer:', rel.roomName, rel.date, oStart+'-'+oEnd+(partial?' (partial of '+top.start+'-'+top.end+')':''), '->', top.staffName);
     if(!DRY){
-      await col('offers').add({ releaseId:rel.id, requestId:top.id, roomId:rel.roomId, roomName:rel.roomName, date:rel.date, start:top.start, end:top.end,
+      await col('offers').add({ releaseId:rel.id, requestId:top.id, roomId:rel.roomId, roomName:rel.roomName, date:rel.date, start:oStart, end:oEnd, partial, reqStart:top.start, reqEnd:top.end,
         staffId:top.staffId, staffName:((await getStaff(top.staffId))||{}).name||'', releasedBy:rel.releasedBy||null, releasedByName:rel.releasedByName||'',
         status:'OFFERED', expiresAt:new Date(expMs).toISOString(), createdAt:new Date().toISOString(), reminderSent:(expMs-Date.now())<=3*3600000 });
       await rel.ref.update({status:'OFFERED'}); await top.ref.update({status:'OFFERED'});
     }
     top.status = 'OFFERED';
-    await notify(top.staffId, 'נמצא עבורך חדר '+rel.roomName+' בתאריך '+fmtDateShort(rel.date)+' בין '+top.start+'–'+top.end+'. יש לך עד '+expDay+' ב-'+ilTime(expMs)+' לאשר.', 'offer');
+    await notify(top.staffId, 'נמצא עבורך חדר '+rel.roomName+' בתאריך '+fmtDateShort(rel.date)+' בין '+oStart+'–'+oEnd+(partial? ' (חלק מהשעות שביקשת, '+top.start+'–'+top.end+'; שאר השעות ממשיכות להמתין)' : '')+'. יש לך עד '+expDay+' ב-'+ilTime(expMs)+' לאשר.', 'offer');
     await log('offer_created', {roomName:rel.roomName, date:rel.date, staffName:top.staffName});
   }
 
